@@ -170,30 +170,32 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
     // BINARY OPERATORS:
     if (IsBinOpCode(wParam))
     {
+        m_bNoPrevEqu = true;
+
         // Change the operation if last input was operation.
         if (IsBinOpCode(m_nLastCom))
         {
             int nPrev;
             bool fPrecInvToHigher = false; // Is Precedence Inversion from lower to higher precedence happening ??
 
-            m_nOpCode = (int)wParam;
+            m_nLastOpCode = m_nBinaryOpCode = (int)wParam;
 
             // Check to see if by changing this binop, a Precedence inversion is happening.
             // Eg. 1 * 2  + and + is getting changed to ^. The previous precedence rules would have already computed
             // 1*2, so we will put additional brackets to cover for precedence inversion and it will become (1 * 2) ^
             // Here * is m_nPrevOpCode, m_currentVal is 2  (by 1*2), m_nLastCom is +, m_nOpCode is ^
-            if (m_fPrecedence && 0 != m_nPrevOpCode)
+            if (m_fPrecedence && 0 != m_nPrevBinaryOpCode)
             {
-                nPrev = NPrecedenceOfOp(m_nPrevOpCode);
+                nPrev = NPrecedenceOfOp(m_nPrevBinaryOpCode);
                 nx = NPrecedenceOfOp(m_nLastCom);
-                ni = NPrecedenceOfOp(m_nOpCode);
+                ni = NPrecedenceOfOp(m_nBinaryOpCode);
                 if (nx <= nPrev && ni > nPrev) // condition for Precedence Inversion
                 {
                     fPrecInvToHigher = true;
-                    m_nPrevOpCode = 0; // Once the precedence inversion has put additional brackets, its no longer required
+                    m_nPrevBinaryOpCode = 0; // Once the precedence inversion has put additional brackets, its no longer required
                 }
             }
-            m_HistoryCollector.ChangeLastBinOp(m_nOpCode, fPrecInvToHigher);
+            m_HistoryCollector.ChangeLastBinOp(m_nBinaryOpCode, fPrecInvToHigher);
             DisplayAnnounceBinaryOperator();
             return;
         }
@@ -214,7 +216,7 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
         DoPrecedenceCheckAgain:
 
             nx = NPrecedenceOfOp((int)wParam);
-            ni = NPrecedenceOfOp(m_nOpCode);
+            ni = NPrecedenceOfOp(m_nBinaryOpCode);
 
             if ((nx > ni) && m_fPrecedence)
             {
@@ -222,7 +224,7 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
                 {
                     m_precedenceVals[m_precedenceOpCount] = m_lastVal;
 
-                    m_nPrecOp[m_precedenceOpCount] = m_nOpCode;
+                    m_nPrecOp[m_precedenceOpCount] = m_nBinaryOpCode;
                     m_HistoryCollector.PushLastOpndStart(); // Eg. 1 + 2  *, Need to remember the start of 2 to do Precedence inversion if need to
                 }
                 else
@@ -238,8 +240,8 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
                  * empty or the top is not the '(' demarcator then pop the top
                  * of the array and recheck precedence against the new operator
                  */
-                m_currentVal = DoOperation(m_nOpCode, m_currentVal, m_lastVal);
-                m_nPrevOpCode = m_nOpCode;
+                m_currentVal = DoOperation(m_nBinaryOpCode, m_currentVal, m_lastVal);
+                m_nPrevBinaryOpCode = m_nBinaryOpCode;
 
                 if (!m_bError)
                 {
@@ -249,11 +251,11 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
                 if ((m_precedenceOpCount != 0) && (m_nPrecOp[m_precedenceOpCount - 1]))
                 {
                     m_precedenceOpCount--;
-                    m_nOpCode = m_nPrecOp[m_precedenceOpCount];
+                    m_nBinaryOpCode = m_nPrecOp[m_precedenceOpCount];
 
                     m_lastVal = m_precedenceVals[m_precedenceOpCount];
 
-                    nx = NPrecedenceOfOp(m_nOpCode);
+                    nx = NPrecedenceOfOp(m_nBinaryOpCode);
                     // Precedence Inversion Higher to lower can happen which needs explicit enclosure of brackets
                     // Eg.  1 + 2 * Or 3 Or.  We would have pushed 1+ before, and now last + forces 2 Or 3 to be evaluated
                     // because last Or is less or equal to first + (after 1). But we see that 1+ is in stack and we evaluated to 2 Or 3
@@ -272,15 +274,16 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
         DisplayAnnounceBinaryOperator();
 
         m_lastVal = m_currentVal;
-        m_nOpCode = (int)wParam;
-        m_HistoryCollector.AddBinOpToHistory(m_nOpCode);
-        m_bNoPrevEqu = m_bChangeOp = true;
+        m_nLastOpCode = m_nBinaryOpCode = (int)wParam;
+        m_HistoryCollector.AddBinOpToHistory(m_nBinaryOpCode);
+        m_bChangeOp = true;
         return;
     }
 
     // UNARY OPERATORS:
     if (IsUnaryOpCode(wParam) || (wParam == IDC_DEGREES))
     {
+        m_bNoPrevEqu = true;
         /* Functions are unary operations.                            */
         /* If the last thing done was an operator, m_currentVal was cleared. */
         /* In that case we better use the number before the operator  */
@@ -295,6 +298,7 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
         // instead, we add the result of applying %.
         if (wParam != IDC_PERCENT)
         {
+            m_nLastOpCode = (INT)wParam;
             if (!m_HistoryCollector.FOpndAddedToHistory())
             {
                 m_HistoryCollector.AddOpndToHistory(m_numberString, m_currentVal);
@@ -374,8 +378,12 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
 
         m_bChangeOp = false;
         m_openParenCount = 0;
-        m_precedenceOpCount = m_nTempCom = m_nLastCom = m_nOpCode = 0;
-        m_nPrevOpCode = 0;
+        m_nLastOpCode = 0;
+        m_precedenceOpCount = 0;
+        m_nTempCom = 0;
+        m_nLastCom = 0;
+        m_nBinaryOpCode = 0;
+        m_nPrevBinaryOpCode = 0;
         m_bNoPrevEqu = true;
 
         /* clear the parenthesis status box indicator, this will not be
@@ -454,12 +462,12 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
         while (m_fPrecedence && m_precedenceOpCount > 0)
         {
             m_precedenceOpCount--;
-            m_nOpCode = m_nPrecOp[m_precedenceOpCount];
+            m_nBinaryOpCode = m_nPrecOp[m_precedenceOpCount];
             m_lastVal = m_precedenceVals[m_precedenceOpCount];
 
             // Precedence Inversion check
-            ni = NPrecedenceOfOp(m_nPrevOpCode);
-            nx = NPrecedenceOfOp(m_nOpCode);
+            ni = NPrecedenceOfOp(m_nPrevBinaryOpCode);
+            nx = NPrecedenceOfOp(m_nBinaryOpCode);
             if (ni <= nx)
             {
                 m_HistoryCollector.EnclosePrecInversionBrackets();
@@ -483,7 +491,7 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
         }
 
         m_bChangeOp = false;
-        m_nPrevOpCode = 0;
+        m_nPrevBinaryOpCode = 0;
 
         break;
 
@@ -519,7 +527,7 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
             // Open level of parentheses, save number and operation.
             m_parenVals[m_openParenCount] = m_lastVal;
 
-            m_nOp[m_openParenCount++] = (m_bChangeOp ? m_nOpCode : 0);
+            m_nOp[m_openParenCount++] = (m_bChangeOp ? m_nBinaryOpCode : 0);
 
             /* save a special marker on the precedence array */
             if (m_precedenceOpCount < m_nPrecOp.size())
@@ -535,7 +543,8 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
                 m_currentVal = 0;
             }
             m_nTempCom = 0;
-            m_nOpCode = 0;
+            m_nBinaryOpCode = 0;
+            m_nLastOpCode = 0;
             m_bChangeOp = false; // a ( is like starting a fresh sub equation
         }
         else
@@ -552,15 +561,15 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
             }
 
             // Get the operation and number and return result.
-            m_currentVal = DoOperation(m_nOpCode, m_currentVal, m_lastVal);
-            m_nPrevOpCode = m_nOpCode;
+            m_currentVal = DoOperation(m_nBinaryOpCode, m_currentVal, m_lastVal);
+            m_nPrevBinaryOpCode = m_nBinaryOpCode;
 
             // Now process the precedence stack till we get to an opcode which is zero.
-            for (m_nOpCode = m_nPrecOp[--m_precedenceOpCount]; m_nOpCode; m_nOpCode = m_nPrecOp[--m_precedenceOpCount])
+            for (m_nBinaryOpCode = m_nPrecOp[--m_precedenceOpCount]; m_nBinaryOpCode; m_nBinaryOpCode = m_nPrecOp[--m_precedenceOpCount])
             {
                 // Precedence Inversion check
-                ni = NPrecedenceOfOp(m_nPrevOpCode);
-                nx = NPrecedenceOfOp(m_nOpCode);
+                ni = NPrecedenceOfOp(m_nPrevBinaryOpCode);
+                nx = NPrecedenceOfOp(m_nBinaryOpCode);
                 if (ni <= nx)
                 {
                     m_HistoryCollector.EnclosePrecInversionBrackets();
@@ -569,8 +578,8 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
 
                 m_lastVal = m_precedenceVals[m_precedenceOpCount];
 
-                m_currentVal = DoOperation(m_nOpCode, m_currentVal, m_lastVal);
-                m_nPrevOpCode = m_nOpCode;
+                m_currentVal = DoOperation(m_nBinaryOpCode, m_currentVal, m_lastVal);
+                m_nPrevBinaryOpCode = m_nBinaryOpCode;
             }
 
             m_HistoryCollector.AddCloseBraceToHistory();
@@ -579,10 +588,10 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
 
             m_openParenCount -= 1;
             m_lastVal = m_parenVals[m_openParenCount];
-            m_nOpCode = m_nOp[m_openParenCount];
+            m_nBinaryOpCode = m_nOp[m_openParenCount];
 
             // m_bChangeOp should be true if m_nOpCode is valid
-            m_bChangeOp = (m_nOpCode != 0);
+            m_bChangeOp = (m_nBinaryOpCode != 0);
         }
 
         // Set the "(=xx" indicator.
@@ -656,7 +665,6 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
         }
 
         m_currentVal = -(m_currentVal);
-
         DisplayNum();
         m_HistoryCollector.AddUnaryOpToHistory(IDC_SIGN, m_bInv, m_angletype);
     }
@@ -748,7 +756,7 @@ void CCalcEngine::ProcessCommandWorker(OpCode wParam)
 void CCalcEngine::ResolveHighestPrecedenceOperation()
 {
     // Is there a valid operation around?
-    if (m_nOpCode)
+    if (m_nLastOpCode)
     {
         // If this is the first EQU in a string, set m_holdVal=m_currentVal
         // Otherwise let m_currentVal=m_holdVal.  This keeps m_currentVal constant
@@ -761,13 +769,29 @@ void CCalcEngine::ResolveHighestPrecedenceOperation()
         {
             m_currentVal = m_holdVal;
             DisplayNum(); // to update the m_numberString
-            m_HistoryCollector.AddBinOpToHistory(m_nOpCode, false);
-            m_HistoryCollector.AddOpndToHistory(m_numberString, m_currentVal); // Adding the repeated last op to history
         }
 
         // Do the current or last operation.
-        m_currentVal = DoOperation(m_nOpCode, m_currentVal, m_lastVal);
-        m_nPrevOpCode = m_nOpCode;
+        if (!m_bNoPrevEqu && m_nBinaryOpCode == 0 && IsUnaryOpCode(m_nLastOpCode))
+        {
+            if (!m_bNoPrevEqu)
+            {
+                m_HistoryCollector.AddUnaryOpToHistory(m_nLastOpCode, m_bInv, m_angletype);
+            }
+            m_currentVal = SciCalcFunctions(m_currentVal, (DWORD)m_nLastOpCode);
+            m_holdVal = m_currentVal;
+        }
+        else if (m_nBinaryOpCode)
+        {
+            if (!m_bNoPrevEqu)
+            {
+                m_HistoryCollector.AddBinOpToHistory(m_nBinaryOpCode, false);
+                m_HistoryCollector.AddOpndToHistory(m_numberString, m_currentVal); // Adding the repeated last op to history
+            }
+            m_currentVal = DoOperation(m_nBinaryOpCode, m_currentVal, m_lastVal);
+            m_nPrevBinaryOpCode = m_nBinaryOpCode;
+        }
+
         m_lastVal = m_currentVal;
 
         // Check for errors.  If this wasn't done, DisplayNum
